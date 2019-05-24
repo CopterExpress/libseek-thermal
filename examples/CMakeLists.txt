@@ -9,6 +9,7 @@ link_libraries (
     -lboost_program_options
     ${OpenCV_LIBRARIES}
     -lusb-1.0
+    -lraspicam
 )
 
 add_executable (seek_test seek_test.cpp)

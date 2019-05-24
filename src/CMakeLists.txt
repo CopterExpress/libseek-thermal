@@ -1,3 +1,5 @@
+
+
 set (HEADERS
     SeekCam.h
     SeekDevice.h
@@ -18,6 +20,7 @@ set (SRC ${SOURCES} ${HEADERS})
 
 include_directories (
     /usr/include/libusb-1.0
+    /usr/local/include/opencv4/opencv2
     ${OpenCV_INCLUDE_DIRS}
 )
 

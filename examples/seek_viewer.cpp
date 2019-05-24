@@ -3,6 +3,7 @@
 
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/videoio/videoio_c.h>
 #include "seek.h"
 #include "SeekCam.h"
 #include <iostream>
