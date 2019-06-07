@@ -119,8 +119,8 @@ bool SeekDevice::fetch_frame(uint16_t* buffer, std::size_t size)
         debug("Asking for %d B of data at %d\n", todo, done);
         res = libusb_bulk_transfer(m_handle, 0x81, &buf[done], todo, &actual_length, m_timeout);
         if (res != 0) {
-            error("Error: bulk transfer failed: %s\n", libusb_error_name(res));
-            return false;
+            error("Fetch frame error: bulk transfer failed: %s\n", libusb_error_name(res));
+            // return false;
         }
         debug("Actual length %d\n", actual_length);
         todo -= actual_length;
