@@ -34,7 +34,7 @@ bool SeekDevice::open()
         return false;
     }
 
-    //libusb_set_debug(NULL, LIBUSB_LOG_LEVEL_WARNING);
+    // libusb_set_debug(NULL, LIBUSB_LOG_LEVEL_DEBUG);
 
     // Init libusb
     res = libusb_init(&m_ctx);
@@ -118,11 +118,16 @@ bool SeekDevice::fetch_frame(uint16_t* buffer, std::size_t size)
     while (todo != 0) {
         debug("Asking for %d B of data at %d\n", todo, done);
         res = libusb_bulk_transfer(m_handle, 0x81, &buf[done], todo, &actual_length, m_timeout);
-        if (res != 0) {
+        if ((res != 0) && (res != LIBUSB_ERROR_TIMEOUT)) {
             error("Fetch frame error: bulk transfer failed: %s\n", libusb_error_name(res));
-            // return false;
+            return false;
         }
-        debug("Actual length %d\n", actual_length);
+        // Sometimes we have less data transferred than expected - so just return this "broken" frame and keep going
+        if (res == LIBUSB_ERROR_TIMEOUT){
+            error("We have libusb timeout here: %s\n", libusb_error_name(res));
+            return true;
+        }
+        debug("Todo size: %d, Actual length %d\n", todo, actual_length);
         todo -= actual_length;
         done += actual_length;
     }
