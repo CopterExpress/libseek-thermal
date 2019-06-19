@@ -24,3 +24,5 @@ install (TARGETS
     seek_create_flat_field
     DESTINATION "bin"
 )
+
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -pthread")
