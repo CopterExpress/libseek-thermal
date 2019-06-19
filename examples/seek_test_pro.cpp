@@ -31,6 +31,11 @@
 // #define FRAME_FORMAT0 V4L2_PIX_FMT_GREY
 #define FRAME_FORMAT1 V4L2_PIX_FMT_BGR24 //MJPEG
 
+bool apply_sobel = false;
+bool apply_canny = true;
+bool apply_colormap = true;
+bool draw_temp = true;
+
 int fdwr1 = 0;
 char *video_device1 = VIDEO_DEVICE;
 struct v4l2_format vid_format1;
@@ -43,13 +48,15 @@ std::mutex lock_thermal, lock_visual;
 // int x = 465;
 // int y = 335;
 // // Cropping area on visual image
-// cv::Rect myROI(x, y, 320, 240);
+// cv::Rect region_to_place_thermal(x, y, 320, 240);
 
 // Gitup3 Duo cropping
 int x = 565;
 int y = 285;
+int thermal_region_width = 800;
+int thermal_region_height = 600;
 // Cropping area on visual image
-cv::Rect myROI(x, y, 800, 600);
+cv::Rect region_to_place_thermal(x, y, thermal_region_width, thermal_region_height);
 
 void print_format(struct v4l2_format *vid_format)
 {
@@ -118,6 +125,52 @@ double temp_from_raw(int x){ //, double device_k) {
     return base - device_k * lin_k + lin_offset - 283.0;
 }
 
+void apply_sobel_edge_detector(cv::Mat &sobel_thermal, cv::Mat &sobel_visual)
+{
+    cv::Mat abs_grad_x, abs_grad_y;
+    int scale = 3;
+    int delta = 0;
+    int ddepth = CV_16S;
+
+    cv::cvtColor(sobel_visual, sobel_visual, cv::COLOR_RGB2GRAY);
+
+    cv::Sobel( sobel_visual, abs_grad_x, ddepth, 1, 0, 3, scale, delta, cv::BORDER_DEFAULT );        
+    cv::Sobel( sobel_visual, abs_grad_y, ddepth, 0, 1, 3, scale, delta, cv::BORDER_DEFAULT );
+
+    cv::convertScaleAbs( abs_grad_x, abs_grad_x );
+    cv::convertScaleAbs( abs_grad_y, abs_grad_y );
+
+    addWeighted( abs_grad_x, 0.5, abs_grad_y, 0.5, 0, sobel_visual );
+
+    // cv::cvtColor(sobel_visual, sobel_visual, cv::COLOR_GRAY2RGB);
+
+    double alpha = 0.5, beta;
+    beta = ( 1.0 - alpha );
+
+    // Mix thermal with visual
+    cv::addWeighted(sobel_visual, alpha, sobel_thermal, beta, 0.0, sobel_thermal); 
+}
+
+void apply_canny_edge_detector(cv::Mat &canny_thermal, cv::Mat &canny_visual)
+{
+    double alpha = 0.5, beta;
+    beta = ( 1.0 - alpha );
+    int lowThreshold = 15;
+    cv::cvtColor(canny_visual, canny_visual, cv::COLOR_RGB2GRAY);
+    cv::blur(canny_visual, canny_visual, cv::Size(3,3) );
+    cv::Canny(canny_visual, canny_visual, lowThreshold, lowThreshold*3, 3);
+
+    // Mix thermal with visual
+    cv::addWeighted(canny_visual, alpha, canny_thermal, beta, 0.0, canny_thermal); 
+}
+
+void draw_temperature(cv::Mat &frame, &temp_string)
+{
+    cv::line(frame, cv::Point(thermal_region_width/2 - 10, thermal_region_height/2), cv::Point(thermal_region_width/2 + 10, thermal_region_height/2), cv::Scalar(255,255,255), 1);
+    cv::line(frame, cv::Point(thermal_region_width/2, thermal_region_height/2 -10), cv::Point(thermal_region_width/2 , thermal_region_height/2 + 10), cv::Scalar(255,255,255), 1);
+    cv::putText(frame, temp_string, cv::Point(thermal_region_width/2 + 10, thermal_region_height/2 + 10), cv::FONT_HERSHEY_DUPLEX, 0.5, cv::Scalar(255,255,255), 1);
+}
+
 void process_thermal_frame()
 {
     LibSeek::SeekThermalPro seek("");//(argc == 2 ? argv[1] : "");
@@ -129,8 +182,8 @@ void process_thermal_frame()
     // Char buffer for temperature drawing
     char txt [64];
 
-    // Temporary Mat for thermal_frame processing.
-    cv::Mat thermal_tmp_frame;
+    // Temporary Mats for thermal_frame processing.
+    cv::Mat thermal_tmp_frame, visual_tmp_frame;
 
     while (1)
     {
@@ -154,16 +207,41 @@ void process_thermal_frame()
         seek.convertToGreyScale(thermal_tmp_frame, thermal_tmp_frame);
         // // cv::normalize(frame, grey_frame, 0, 65535, cv::NORM_MINMAX);
         cv::GaussianBlur(thermal_tmp_frame, thermal_tmp_frame, cv::Size(7,7), 0);
-        cv::applyColorMap(thermal_tmp_frame, thermal_tmp_frame, cv::COLORMAP_HOT);
-        // cv::resize(thermal_frame, thermal_frame, cv::Size(FRAME_WIDTH, FRAME_HEIGHT));
 
         cv::flip(thermal_tmp_frame, thermal_tmp_frame, -1);
-
-        cv::line(thermal_tmp_frame, cv::Point(150,120), cv::Point(170,120), cv::Scalar(255,255,255), 1);
-        cv::line(thermal_tmp_frame, cv::Point(160,110), cv::Point(160,130), cv::Scalar(255,255,255), 1);
-        cv::putText(thermal_tmp_frame, txt, cv::Point(170,140), cv::FONT_HERSHEY_DUPLEX, 0.25, cv::Scalar(255,255,255), 1);
-
         cv::resize(thermal_tmp_frame, thermal_tmp_frame, cv::Size(800, 600));
+
+        // If we want to apply any of edge_detectors we need to copy region of visual frame
+        if (apply_sobel || apply_canny)
+        {
+            lock_visual.lock();
+            visual_tmp_frame = visual_frame(region_to_place_thermal);
+            lock_visual.unlock();
+        }
+        
+        if (apply_sobel)
+        {
+            apply_sobel_edge_detector(thermal_tmp_frame, visual_tmp_frame);
+        }
+        else if (apply_canny)
+        {
+            apply_canny_edge_detector(thermal_tmp_frame, visual_tmp_frame);
+        }
+        
+        if (apply_colormap)
+        {
+            cv::applyColorMap(thermal_tmp_frame, thermal_tmp_frame, cv::COLORMAP_HOT);
+        }
+        else
+        {
+            cv::cvtColor(thermal_tmp_frame, thermal_tmp_frame, cv::COLOR_GRAY2RGB);
+        }
+
+        if (draw_temp)
+        {
+            draw_temperature(thermal_tmp_frame, txt);
+        }
+        
 
         lock_thermal.lock();
         thermal_frame = thermal_tmp_frame.clone();
@@ -210,47 +288,27 @@ void process_visual_frame()
 
         // Creating Mat object from visual frame buffer
         full_visual_frame = cv::Mat(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC3, data, FRAME_WIDTH*BYTES_PER_PIXEL);
-        // visual_frame = cv::Mat(visual_frame);
+
+        lock_visual.lock();
+        visual_frame = full_visual_frame.clone();
+        lock_visual.unlock();
         
         // std::cout << "Visual frame width: " << visual_frame.cols << "; visual frame height: " << visual_frame.rows << std::endl;
 
         
         // cv::resize(visual_frame, visual_frame, cv::Size(FRAME_WIDTH, FRAME_HEIGHT));
-        // visual_frame = visual_frame(myROI);
+        // visual_frame = visual_frame(region_to_place_thermal);
         // // cv::flip(visual_frame, visual_frame, -1);
         // cv::resize(visual_frame, visual_frame, cv::Size(320, 240));
 
         // // Corner detection on a visual
-        // double alpha = 0.5, beta;
-        // beta = ( 1.0 - alpha );
-        // int lowThreshold = 5;
-        // cv::cvtColor(visual_frame, visual_frame, cv::COLOR_RGB2GRAY);
-        // cv::blur(visual_frame, visual_frame, cv::Size(3,3) );
-        // //cv::Canny(visual_frame, visual_frame, lowThreshold, lowThreshold*3, 3);
-
-        // cv::Mat abs_grad_x, abs_grad_y;
-        // int scale = 3;
-        // int delta = 0;
-        // int ddepth = CV_16S;
-
-        // cv::Sobel( visual_frame, abs_grad_x, ddepth, 1, 0, 3, scale, delta, cv::BORDER_DEFAULT );        
-        // cv::Sobel( visual_frame, abs_grad_y, ddepth, 0, 1, 3, scale, delta, cv::BORDER_DEFAULT );
-
-        // cv::convertScaleAbs( abs_grad_x, abs_grad_x );
-        // cv::convertScaleAbs( abs_grad_y, abs_grad_y );
-
-        // addWeighted( abs_grad_x, 0.5, abs_grad_y, 0.5, 0, visual_frame );
-
-        // cv::cvtColor(visual_frame, visual_frame, cv::COLOR_GRAY2RGB);
-
-        // // Mix thermal with visual
-        // cv::addWeighted(visual_frame, alpha, thermal_frame, beta, 0.0, visual_frame);  
+        
 
         // cv::flip(visual_frame, visual_frame, -1);
 
         lock_thermal.lock();
         if (!thermal_frame.empty())
-            thermal_frame.copyTo(full_visual_frame(myROI));//cv::Rect(x, y, visual_frame.cols, visual_frame.rows))); 
+            thermal_frame.copyTo(full_visual_frame(region_to_place_thermal));//cv::Rect(x, y, visual_frame.cols, visual_frame.rows))); 
         lock_thermal.unlock();
 
         // cv::Rect cropping_area(300, 250, 680, 400);
