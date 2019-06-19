@@ -31,8 +31,8 @@
 // #define FRAME_FORMAT0 V4L2_PIX_FMT_GREY
 #define FRAME_FORMAT1 V4L2_PIX_FMT_BGR24 //MJPEG
 
-bool apply_sobel = false;
-bool apply_canny = true;
+bool apply_sobel = true;
+bool apply_canny = false;
 bool apply_colormap = true;
 bool draw_temp = true;
 
@@ -52,7 +52,7 @@ std::mutex lock_thermal, lock_visual;
 
 // Gitup3 Duo cropping
 int x = 565;
-int y = 285;
+int y = 205;
 int thermal_region_width = 800;
 int thermal_region_height = 600;
 // Cropping area on visual image
@@ -164,7 +164,7 @@ void apply_canny_edge_detector(cv::Mat &canny_thermal, cv::Mat &canny_visual)
     cv::addWeighted(canny_visual, alpha, canny_thermal, beta, 0.0, canny_thermal); 
 }
 
-void draw_temperature(cv::Mat &frame, &temp_string)
+void draw_temperature(cv::Mat &frame, char* temp_string)
 {
     cv::line(frame, cv::Point(thermal_region_width/2 - 10, thermal_region_height/2), cv::Point(thermal_region_width/2 + 10, thermal_region_height/2), cv::Scalar(255,255,255), 1);
     cv::line(frame, cv::Point(thermal_region_width/2, thermal_region_height/2 -10), cv::Point(thermal_region_width/2 , thermal_region_height/2 + 10), cv::Scalar(255,255,255), 1);
@@ -214,9 +214,10 @@ void process_thermal_frame()
         // If we want to apply any of edge_detectors we need to copy region of visual frame
         if (apply_sobel || apply_canny)
         {
-            lock_visual.lock();
-            visual_tmp_frame = visual_frame(region_to_place_thermal);
-            lock_visual.unlock();
+            {
+                std::lock_guard<std::mutex> lock_visual_guard(lock_visual);
+                visual_tmp_frame = visual_frame(region_to_place_thermal);
+            }
         }
         
         if (apply_sobel)
@@ -241,11 +242,11 @@ void process_thermal_frame()
         {
             draw_temperature(thermal_tmp_frame, txt);
         }
-        
 
-        lock_thermal.lock();
-        thermal_frame = thermal_tmp_frame.clone();
-        lock_thermal.unlock();
+        {
+            std::lock_guard<std::mutex> lock_thermal_guard(lock_thermal);
+            thermal_frame = thermal_tmp_frame.clone();
+        }
     }
 }
 
@@ -289,10 +290,11 @@ void process_visual_frame()
         // Creating Mat object from visual frame buffer
         full_visual_frame = cv::Mat(FRAME_HEIGHT, FRAME_WIDTH, CV_8UC3, data, FRAME_WIDTH*BYTES_PER_PIXEL);
 
-        lock_visual.lock();
-        visual_frame = full_visual_frame.clone();
-        lock_visual.unlock();
-        
+        {
+            std::lock_guard<std::mutex> lock_visual_guard(lock_visual);
+            visual_frame = full_visual_frame.clone();
+        }        
+
         // std::cout << "Visual frame width: " << visual_frame.cols << "; visual frame height: " << visual_frame.rows << std::endl;
 
         
@@ -306,10 +308,11 @@ void process_visual_frame()
 
         // cv::flip(visual_frame, visual_frame, -1);
 
-        lock_thermal.lock();
-        if (!thermal_frame.empty())
-            thermal_frame.copyTo(full_visual_frame(region_to_place_thermal));//cv::Rect(x, y, visual_frame.cols, visual_frame.rows))); 
-        lock_thermal.unlock();
+        {
+            std::lock_guard<std::mutex> lock_thermal_guard(lock_thermal);
+            if (!thermal_frame.empty())
+                thermal_frame.copyTo(full_visual_frame(region_to_place_thermal));//cv::Rect(x, y, visual_frame.cols, visual_frame.rows))); 
+        }
 
         // cv::Rect cropping_area(300, 250, 680, 400);
         // full_visual_frame = full_visual_frame(cropping_area);
