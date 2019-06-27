@@ -1,0 +1,3 @@
+[submodule "duocam-common"]
+	path = duocam-common
+	url = https://github.com/CopterExpress/duocam-common.git
