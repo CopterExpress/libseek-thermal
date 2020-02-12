@@ -233,7 +233,7 @@ void SeekCam::create_dead_pixel_list(cv::Mat frame, cv::Mat& dead_pixel_mask,
     cv::Point hist_max_value;
     cv::Mat tmp, hist;
     int channels[] = {0};
-    int histSize[] = {0x4000};
+    int histSize[] = {0x3000};
     float range[] = {0, 0x4000};
     const float* ranges[] = { range };
 
